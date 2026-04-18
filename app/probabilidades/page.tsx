@@ -203,9 +203,11 @@ export default function ProbabilidadesPage() {
                 <Tooltip
                   contentStyle={{ background: "#0D1014", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 12, color: "#F6F7FB" }}
                   labelStyle={{ color: "#98A3B8", fontSize: 11 }}
-                  formatter={(value: number | string | null, key: string) => {
+                  formatter={(value, name) => {
+                    const key = String(name ?? "");
                     const team = FEATURED_TEAMS.find((item) => item.teamKey === key);
-                    return [value == null ? "—" : `${value}%`, team?.teamName || key];
+                    const displayValue = value == null ? "—" : Array.isArray(value) ? value.join(" - ") : `${value}%`;
+                    return [displayValue, team?.teamName || key] as [string, string];
                   }}
                 />
                 {FEATURED_TEAMS.map((team) => (
