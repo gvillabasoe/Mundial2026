@@ -54,7 +54,7 @@ const RADAR_CARDS = [
     icon: Clock3,
     color: "#F0417A",
     label: "Partido test API",
-    text: "Crystal Palace vs West Ham United con marcador real, polling live y auto-hide solo tras 2h + estado final.",
+    text: "Crystal Palace vs West Ham con polling real, marcador vivo y auto-hide al cumplir 2 horas + FT/AET/PEN.",
   },
   {
     href: "/mi-club",

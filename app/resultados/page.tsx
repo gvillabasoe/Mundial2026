@@ -1,12 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ChangeEvent } from "react";
 import useSWR from "swr";
 import { AlertCircle, ChevronDown, ChevronUp, Clock3, MapPin, Search, Wifi, WifiOff } from "lucide-react";
 import { EmptyState, Flag, GroupBadge } from "@/components/ui";
 import { FIXTURES, GROUPS } from "@/lib/data";
 import { ALL_HOST_CITIES, getCityBgColor, getCityColor, getZoneForCity, REGION_LABELS, REGION_PALETTES, type Zone } from "@/lib/config/regions";
-import { formatMatchStatus, getStatusGroup, isPollingLiveStatus, normalizeScoreValue } from "@/lib/config/match-status";
+import { getStatusDisplay, getStatusGroup, isLivePollingStatus } from "@/lib/config/match-status";
 import { STAGE_LABELS, STAGE_ORDER, WORLD_CUP_MATCHES, type MatchStage, type WorldCupMatch } from "@/lib/worldcup/schedule";
 
 interface ApiFixtureItem {
@@ -51,6 +51,7 @@ interface MatchView {
   supplemental: boolean;
 }
 
+
 const fetcher = async (url: string): Promise<ResultsApiPayload> => {
   const response = await fetch(url, { cache: "no-store" });
   const data = await response.json();
@@ -60,12 +61,7 @@ const fetcher = async (url: string): Promise<ResultsApiPayload> => {
   return data;
 };
 
-function hasPollingFixtures(fixtures: ApiFixtureItem[]): boolean {
-  return fixtures.some((fixture) => isPollingLiveStatus(fixture.statusShort));
-}
-
 const KNOWN_TEAMS = new Set(Object.values(GROUPS).flat());
-const SUPPLEMENTAL_HIDE_AFTER_MS = 2 * 60 * 60 * 1000;
 
 function normalizeKey(name: string) {
   return name
@@ -98,7 +94,7 @@ function buildIsoSeries(startDate: string, hoursUtc: number[], count: number): s
   return values;
 }
 
-const GROUP_FALLBACK_KICKOFFS = new Map<string, string>(
+const GROUP_FALLBACK_KICKOFFS = new Map(
   FIXTURES.map((fixture) => [`${normalizeKey(fixture.homeTeam)}|${normalizeKey(fixture.awayTeam)}`, fixture.kickoff])
 );
 
@@ -121,7 +117,7 @@ const KNOCKOUT_FALLBACK_BY_ID = new Map<number, string>();
 });
 
 function getGroupForMatch(homeTeam: string, awayTeam: string): string | null {
-  for (const [group, teams] of Object.entries(GROUPS) as Array<[string, string[]]>) {
+  for (const [group, teams] of Object.entries(GROUPS)) {
     if (teams.includes(homeTeam) && teams.includes(awayTeam)) return group;
   }
   return null;
@@ -153,7 +149,9 @@ function mergeScheduleWithApi(fixtures: ApiFixtureItem[]): MatchView[] {
 
   const groupMap = buildGroupFixtureMap(worldCupFixtures);
   const stageMap = STAGE_ORDER.reduce<Record<MatchStage, ApiFixtureItem[]>>((acc, stage) => {
-    acc[stage] = worldCupFixtures.filter((fixture) => fixture.stage === stage).sort((a, b) => new Date(a.kickoff).getTime() - new Date(b.kickoff).getTime());
+    acc[stage] = worldCupFixtures
+      .filter((fixture) => fixture.stage === stage)
+      .sort((a, b) => new Date(a.kickoff).getTime() - new Date(b.kickoff).getTime());
     return acc;
   }, {
     group: [],
@@ -243,6 +241,26 @@ function formatKickoff(kickoff: string) {
   }).format(new Date(kickoff));
 }
 
+function getNextSupplementalRefreshDelay(fixtures: ApiFixtureItem[], now = Date.now()): number | null {
+  const candidates = fixtures
+    .filter((fixture) => fixture.supplemental)
+    .map((fixture) => {
+      const kickoffAt = new Date(fixture.kickoff).getTime();
+      if (Number.isNaN(kickoffAt)) return null;
+
+      const status = (fixture.statusShort || "NS").toUpperCase();
+      if (status === "NS" && kickoffAt > now) {
+        return kickoffAt + 1000;
+      }
+
+      return null;
+    })
+    .filter((value): value is number => typeof value === "number");
+
+  if (candidates.length === 0) return null;
+  return Math.max(1000, Math.min(...candidates) - now);
+}
+
 export default function ResultadosPage() {
   const [search, setSearch] = useState("");
   const [stageFilter, setStageFilter] = useState<MatchStage | "all">("all");
@@ -251,43 +269,16 @@ export default function ResultadosPage() {
   const [expanded, setExpanded] = useState<string | null>("group");
 
   const { data, error, mutate } = useSWR<ResultsApiPayload>("/api/results/fixtures", fetcher, {
-    refreshInterval: (latestData) => (hasPollingFixtures(latestData?.fixtures || []) ? 30000 : 0),
+    refreshInterval: (latestData?: ResultsApiPayload) => (latestData?.fixtures || []).some((fixture: ApiFixtureItem) => isLivePollingStatus(fixture.statusShort)) ? 30000 : 0,
     revalidateOnFocus: true,
   });
 
-  const connection = error ? "error" : data?.connection || "calendar";
-  const hasLivePolling = useMemo(() => hasPollingFixtures(data?.fixtures || []), [data]);
-  const mergedMatches = useMemo(() => mergeScheduleWithApi(data?.fixtures || []), [data]);
-
   useEffect(() => {
-    if (!data?.fixtures?.length || hasPollingFixtures(data.fixtures)) return;
+    const fixtures = data?.fixtures || [];
+    if (fixtures.some((fixture) => isLivePollingStatus(fixture.statusShort))) return;
 
-    const now = Date.now();
-    const nextRefreshAt = data.fixtures
-      .map((fixture) => {
-        const statusShort = (fixture.statusShort || "NS").toUpperCase();
-        const kickoffAt = new Date(fixture.kickoff).getTime();
-        if (!Number.isFinite(kickoffAt)) return null;
-
-        if (statusShort === "NS" && kickoffAt > now) {
-          return kickoffAt + 1000;
-        }
-
-        if (fixture.supplemental && ["FT", "AET", "PEN"].includes(statusShort)) {
-          const hideAt = kickoffAt + SUPPLEMENTAL_HIDE_AFTER_MS + 1000;
-          return hideAt > now ? hideAt : null;
-        }
-
-        return null;
-      })
-      .filter((timestamp): timestamp is number => typeof timestamp === "number")
-      .sort((a, b) => a - b)[0];
-
-    if (!nextRefreshAt) return;
-
-    const delay = nextRefreshAt - now;
-    const maxTimeout = 2147483647;
-    if (delay <= 0 || delay > maxTimeout) return;
+    const delay = getNextSupplementalRefreshDelay(fixtures);
+    if (!delay) return;
 
     const timeout = window.setTimeout(() => {
       void mutate();
@@ -295,6 +286,9 @@ export default function ResultadosPage() {
 
     return () => window.clearTimeout(timeout);
   }, [data, mutate]);
+
+  const connection = error ? "error" : data?.connection || "calendar";
+  const mergedMatches = useMemo(() => mergeScheduleWithApi(data?.fixtures || []), [data]);
 
   const filteredMatches = useMemo(() => {
     let matches = [...mergedMatches];
@@ -330,12 +324,24 @@ export default function ResultadosPage() {
     return matches;
   }, [cityFilter, mergedMatches, search, stageFilter, zoneFilter]);
 
+  const testMatches = useMemo(
+    () => mergedMatches
+      .filter((match) => match.supplemental)
+      .sort((a, b) => new Date(a.kickoff).getTime() - new Date(b.kickoff).getTime()),
+    [mergedMatches]
+  );
+
+  const filteredWorldCupCount = filteredMatches.filter((match) => !match.supplemental).length;
+
   const groupedByStage = useMemo(() => {
     const groups: Partial<Record<MatchStage, MatchView[]>> = {};
-    filteredMatches.forEach((match) => {
-      if (!groups[match.stage]) groups[match.stage] = [];
-      groups[match.stage]!.push(match);
-    });
+
+    filteredMatches
+      .filter((match) => !match.supplemental)
+      .forEach((match) => {
+        if (!groups[match.stage]) groups[match.stage] = [];
+        groups[match.stage]!.push(match);
+      });
 
     Object.values(groups).forEach((matches) => {
       matches?.sort((a, b) => new Date(a.kickoff).getTime() - new Date(b.kickoff).getTime());
@@ -352,9 +358,7 @@ export default function ResultadosPage() {
   ] as const;
 
   const connectionNode = connection === "live"
-    ? hasLivePolling
-      ? <span className="badge badge-green"><Wifi size={12} /> API live</span>
-      : <span className="badge badge-muted"><Wifi size={12} /> API conectada</span>
+    ? <span className="badge badge-green"><Wifi size={12} /> API conectada</span>
     : connection === "error"
       ? <span className="badge badge-red"><AlertCircle size={12} /> Sin conexión</span>
       : <span className="badge badge-muted"><WifiOff size={12} /> Calendario base</span>;
@@ -364,16 +368,10 @@ export default function ResultadosPage() {
       <div className="page-header animate-fade-in">
         <div>
           <h1 className="page-header__title">Resultados</h1>
-          <p className="page-header__subtitle">Mundial 2026 · calendario oficial + test API Premier League</p>
+          <p className="page-header__subtitle">Mundial 2026 · 104 partidos + sección Test Premier League</p>
         </div>
         {connectionNode}
       </div>
-
-      {data?.error ? (
-        <p className="status-note mb-3 text-text-muted">
-          {data.error}
-        </p>
-      ) : null}
 
       <div className="relative mb-3">
         <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-text-muted" />
@@ -381,7 +379,7 @@ export default function ResultadosPage() {
           className="input-field !pl-9"
           placeholder="Buscar equipo, ciudad, competición o nº partido..."
           value={search}
-          onChange={(event: any) => setSearch(event.target.value)}
+          onChange={(event: ChangeEvent<HTMLInputElement>) => setSearch(event.target.value)}
         />
       </div>
 
@@ -421,49 +419,70 @@ export default function ResultadosPage() {
         </div>
       ) : null}
 
-      <p className="mb-3 text-[11px] text-text-muted">{filteredMatches.length} partidos</p>
+      <p className="mb-3 text-[11px] text-text-muted">
+        {filteredWorldCupCount} partidos del Mundial{testMatches.length > 0 ? ` + ${testMatches.length} test` : ""}
+      </p>
 
-      {filteredMatches.length === 0 ? (
-        <EmptyState title="Sin resultados" text="No hay partidos que coincidan con tus filtros." icon={Search} />
+      {testMatches.length > 0 ? (
+        <section className="mb-3 animate-fade-in">
+          <div
+            className="flex items-center justify-between rounded-[16px] border border-[rgba(64,145,255,0.18)] bg-[rgba(64,145,255,0.08)] px-4 py-3 text-left text-text-warm"
+          >
+            <span className="font-display text-[15px] font-bold">
+              Test <span className="ml-1 text-[11px] font-normal text-text-muted">({testMatches.length})</span>
+            </span>
+          </div>
+          <div className="mt-2 flex flex-col gap-2">
+            {testMatches.map((match) => (
+              <ScheduleMatchCard key={`test-${match.id}-${match.displayHomeTeam}`} match={match} />
+            ))}
+          </div>
+        </section>
+      ) : null}
+
+      {filteredWorldCupCount === 0 ? (
+        <EmptyState title="Sin resultados" text="No hay partidos del Mundial que coincidan con tus filtros." icon={Search} />
       ) : (
-        STAGE_ORDER.map((stage) => {
-          const matches = groupedByStage[stage];
-          if (!matches || matches.length === 0) return null;
-          const isOpen = expanded === stage;
-          const isFinal = stage === "final";
+        <>
+          {STAGE_ORDER.map((stage) => {
+            const matches = groupedByStage[stage];
+            if (!matches || matches.length === 0) return null;
+            const isOpen = expanded === stage;
+            const isFinal = stage === "final";
 
-          return (
-            <section key={stage} className="mb-2.5 animate-fade-in">
-              <button
-                type="button"
-                onClick={() => setExpanded(expanded === stage ? null : stage)}
-                className="flex w-full items-center justify-between rounded-[16px] px-4 py-3 text-left"
-                style={{
-                  background: isFinal ? "rgba(212,175,55,0.08)" : "rgb(var(--bg-4))",
-                  border: isFinal ? "1px solid rgba(212,175,55,0.22)" : "1px solid rgba(var(--divider),0.08)",
-                  color: "rgb(var(--text-warm))",
-                }}
-              >
-                <span className="font-display text-[15px] font-bold">
-                  {STAGE_LABELS[stage]} <span className="ml-1 text-[11px] font-normal text-text-muted">({matches.length})</span>
-                </span>
-                {isOpen ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
-              </button>
-              {isOpen ? (
-                <div className="mt-2 flex flex-col gap-2">
-                  {matches.map((match) => <ScheduleMatchCard key={`${match.stage}-${match.id}-${match.displayHomeTeam}`} match={match} />)}
-                </div>
-              ) : null}
-            </section>
-          );
-        })
+            return (
+              <section key={stage} className="mb-2.5 animate-fade-in">
+                <button
+                  type="button"
+                  onClick={() => setExpanded(expanded === stage ? null : stage)}
+                  className="flex w-full items-center justify-between rounded-[16px] px-4 py-3 text-left"
+                  style={{
+                    background: isFinal ? "rgba(212,175,55,0.08)" : "rgb(var(--bg-4))",
+                    border: isFinal ? "1px solid rgba(212,175,55,0.22)" : "1px solid rgba(var(--divider),0.08)",
+                    color: "rgb(var(--text-warm))",
+                  }}
+                >
+                  <span className="font-display text-[15px] font-bold">
+                    {STAGE_LABELS[stage]} <span className="ml-1 text-[11px] font-normal text-text-muted">({matches.length})</span>
+                  </span>
+                  {isOpen ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
+                </button>
+                {isOpen ? (
+                  <div className="mt-2 flex flex-col gap-2">
+                    {matches.map((match) => <ScheduleMatchCard key={`${match.stage}-${match.id}-${match.displayHomeTeam}`} match={match} />)}
+                  </div>
+                ) : null}
+              </section>
+            );
+          })}
+        </>
       )}
 
       {connection !== "live" ? (
         <p className="status-note mb-6 mt-4 text-text-muted">
           {connection === "error"
-            ? "Sin conexión con la API en este momento. Se mantiene el calendario base del Mundial y, si la API responde, el partido de test de Premier League se renderiza sin temporizador simulado."
-            : "La app hace polling real cada 30 segundos solo cuando hay un partido en estados 1H, HT, 2H, ET, BT o P. Si no hay un partido live, se mantiene la última respuesta de la API sin refrescos innecesarios."}
+            ? "La API no responde ahora mismo. El Mundial mantiene el calendario base y el test de Premier League queda en modo placeholder hasta recuperar conexión."
+            : "Se muestra el calendario base del Mundial. Cuando la API esté disponible, el test de Premier League tomará marcador, estado y minuto reales."}
         </p>
       ) : null}
     </div>
@@ -473,13 +492,13 @@ export default function ResultadosPage() {
 function ScheduleMatchCard({ match }: { match: MatchView }) {
   const isSpain = match.displayHomeTeam === "España" || match.displayAwayTeam === "España";
   const statusGroup = getStatusGroup(match.statusShort);
-  const statusText = formatMatchStatus(match.statusShort, match.minute, match.kickoff);
-  const homeScore = normalizeScoreValue(match.score.home);
-  const awayScore = normalizeScoreValue(match.score.away);
   const cityColor = getCityColor(match.hostCity);
   const showHomeFlag = KNOWN_TEAMS.has(match.displayHomeTeam);
   const showAwayFlag = KNOWN_TEAMS.has(match.displayAwayTeam);
   const roundLabel = match.competitionLabel || match.roundLabel;
+  const scoreHome = match.score.home ?? 0;
+  const scoreAway = match.score.away ?? 0;
+  const statusText = getStatusDisplay(match.statusShort, { elapsed: match.minute, kickoff: match.kickoff });
 
   const statusBadgeClass =
     statusGroup === "live"
@@ -519,7 +538,7 @@ function ScheduleMatchCard({ match }: { match: MatchView }) {
           {showHomeFlag ? <Flag country={match.displayHomeTeam} size="sm" /> : null}
         </div>
         <div className="min-w-[58px] rounded-xl border border-[rgb(var(--divider)/0.08)] bg-bg-2 px-2.5 py-1 text-center font-display text-sm font-bold text-text-muted shadow-[inset_0_1px_0_rgba(var(--surface-soft),0.03)]">
-          {homeScore} - {awayScore}
+          {`${scoreHome} - ${scoreAway}`}
         </div>
         <div className="flex flex-1 items-center gap-1.5 text-left">
           {showAwayFlag ? <Flag country={match.displayAwayTeam} size="sm" /> : null}
