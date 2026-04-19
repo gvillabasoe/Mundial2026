@@ -6,8 +6,11 @@ export type MatchStatusGroup =
   | "postponed"
   | "cancelled";
 
-const LIVE_STATUS_SHORTS = new Set(["1H", "HT", "2H", "ET", "BT", "P"]);
-const FINISHED_STATUS_SHORTS = new Set(["FT", "AET", "PEN"]);
+const LIVE_POLLING_STATUS_VALUES = ["LIVE", "1H", "HT", "2H", "ET", "BT", "P"] as const;
+const TERMINAL_STATUS_VALUES = ["FT", "AET", "PEN"] as const;
+
+export const LIVE_POLLING_STATUSES = new Set<string>(LIVE_POLLING_STATUS_VALUES);
+export const TERMINAL_STATUSES = new Set<string>(TERMINAL_STATUS_VALUES);
 
 export const STATUS_LABELS: Record<string, string> = {
   NS: "Por comenzar",
@@ -26,9 +29,6 @@ export const STATUS_LABELS: Record<string, string> = {
   CANC: "Cancelado",
   SUSP: "Suspendido",
   ABD: "Suspendido",
-  INT: "Suspendido",
-  AWD: "Suspendido",
-  WO: "Suspendido",
 };
 
 function normalizeStatus(statusShort?: string | null): string {
@@ -38,23 +38,23 @@ function normalizeStatus(statusShort?: string | null): string {
 function formatMadridKickoffTime(kickoff?: string | null): string | null {
   if (!kickoff) return null;
 
-  const date = new Date(kickoff);
-  if (Number.isNaN(date.getTime())) return null;
+  const parsed = new Date(kickoff);
+  if (Number.isNaN(parsed.getTime())) return null;
 
   return new Intl.DateTimeFormat("es-ES", {
     timeZone: "Europe/Madrid",
     hour: "2-digit",
     minute: "2-digit",
-  }).format(date);
+  }).format(parsed);
 }
 
 export function getStatusGroup(statusShort?: string | null): MatchStatusGroup {
   const short = normalizeStatus(statusShort);
-  if (["1H", "2H", "ET", "P", "LIVE"].includes(short)) return "live";
+  if (["LIVE", "1H", "2H", "ET", "P"].includes(short)) return "live";
   if (["HT", "BT"].includes(short)) return "halftime";
-  if (FINISHED_STATUS_SHORTS.has(short)) return "finished";
+  if (TERMINAL_STATUSES.has(short)) return "finished";
   if (short === "PST") return "postponed";
-  if (["CANC", "SUSP", "ABD", "INT", "AWD", "WO"].includes(short)) return "cancelled";
+  if (["CANC", "SUSP", "ABD"].includes(short)) return "cancelled";
   return "scheduled";
 }
 
@@ -63,24 +63,26 @@ export function getStatusLabel(statusShort?: string | null): string {
   return STATUS_LABELS[short] || STATUS_LABELS.NS;
 }
 
-export function formatMatchStatus(statusShort?: string | null, elapsed?: number | null, kickoff?: string | null): string {
+export function getStatusDisplay(
+  statusShort?: string | null,
+  options?: { elapsed?: number | null; kickoff?: string | null }
+): string {
   const short = normalizeStatus(statusShort);
-  const elapsedValue = typeof elapsed === "number" ? `${elapsed}'` : null;
+  const elapsed = typeof options?.elapsed === "number" ? options.elapsed : null;
+  const madridTime = formatMadridKickoffTime(options?.kickoff);
 
   switch (short) {
     case "NS":
-    case "TBD": {
-      const kickoffTime = formatMadridKickoffTime(kickoff);
-      return kickoffTime ? `Por comenzar · ${kickoffTime}` : "Por comenzar";
-    }
+    case "TBD":
+      return madridTime ? `Por comenzar · ${madridTime}` : "Por comenzar";
+    case "LIVE":
     case "1H":
     case "2H":
-    case "LIVE":
-      return elapsedValue ? `En juego · min ${elapsedValue}` : "En juego";
+      return elapsed !== null ? `En juego · min ${elapsed}'` : "En juego";
     case "HT":
       return "DESCANSO";
     case "ET":
-      return elapsedValue ? `Prórroga · min ${elapsedValue}` : "Prórroga";
+      return elapsed !== null ? `Prórroga · min ${elapsed}'` : "Prórroga";
     case "BT":
       return "Descanso prórroga";
     case "P":
@@ -91,27 +93,30 @@ export function formatMatchStatus(statusShort?: string | null, elapsed?: number 
       return "Finalizado (prórroga)";
     case "PEN":
       return "Finalizado (penaltis)";
+    case "PST":
+      return "Aplazado";
+    case "CANC":
+      return "Cancelado";
+    case "SUSP":
+    case "ABD":
+      return "Suspendido";
     default:
-      return getStatusLabel(short);
+      return madridTime ? `Por comenzar · ${madridTime}` : getStatusLabel(short);
   }
 }
 
-export function shouldShowScore(): boolean {
+export function shouldShowScore(_statusShort?: string | null, _home?: number | null, _away?: number | null): boolean {
   return true;
 }
 
-export function normalizeScoreValue(value?: number | null): number {
-  return typeof value === "number" ? value : 0;
-}
-
-export function isPollingLiveStatus(statusShort?: string | null): boolean {
-  return LIVE_STATUS_SHORTS.has(normalizeStatus(statusShort));
-}
-
-export function isFinishedStatus(statusShort?: string | null): boolean {
-  return FINISHED_STATUS_SHORTS.has(normalizeStatus(statusShort));
-}
-
 export function isLiveLike(statusShort?: string | null): boolean {
-  return isPollingLiveStatus(statusShort);
+  return getStatusGroup(statusShort) === "live";
+}
+
+export function isLivePollingStatus(statusShort?: string | null): boolean {
+  return LIVE_POLLING_STATUSES.has(normalizeStatus(statusShort));
+}
+
+export function isTerminalStatus(statusShort?: string | null): boolean {
+  return TERMINAL_STATUSES.has(normalizeStatus(statusShort));
 }
