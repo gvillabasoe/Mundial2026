@@ -5,6 +5,7 @@ import { isLivePollingStatus, isTerminalStatus } from "@/lib/config/match-status
 import type { MatchStage } from "@/lib/worldcup/schedule";
 
 export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 const API_BASE = "https://v3.football.api-sports.io";
 const WORLD_CUP_LEAGUE_ID = 1;
@@ -17,6 +18,8 @@ const TEST_FIXTURE_LOOKUP = {
 } as const;
 const TEST_FIXTURE_ID_CACHE_TTL_MS = 12 * 60 * 60 * 1000;
 const TEST_FALLBACK_VISIBLE_MS = 4 * 60 * 60 * 1000;
+const TEST_HIDE_AFTER_MS = 2 * 60 * 60 * 1000;
+const API_TIMEOUT_MS = 10000;
 const FALLBACK_API_SPORTS_KEY = "4efad1513ecd4f716ad4f91fbff82490";
 
 let testFixtureIdCache: { id: number | null; expiresAt: number } | null = null;
@@ -77,6 +80,17 @@ function sortFixtures(fixtures: ApiFixtureItem[]) {
   return [...fixtures].sort((a, b) => new Date(a.kickoff).getTime() - new Date(b.kickoff).getTime());
 }
 
+function getApiKey(): string | null {
+  return (
+    process.env.API_SPORTS_KEY ||
+    process.env.API_FOOTBALL_KEY ||
+    process.env.APISPORTS_KEY ||
+    process.env.X_APISPORTS_KEY ||
+    FALLBACK_API_SPORTS_KEY ||
+    null
+  );
+}
+
 function buildFallbackTestFixture(now = new Date()): ApiFixtureItem | null {
   const kickoff = `${TEST_FIXTURE_LOOKUP.date}T19:00:00Z`;
   const kickoffAt = new Date(kickoff).getTime();
@@ -110,8 +124,10 @@ function normalizeLooseKey(value: string | null | undefined): string {
     .trim();
 }
 
-function extractResponseArray(payload: any): RawApiFixture[] {
-  return Array.isArray(payload?.response) ? payload.response : [];
+function extractResponseArray(payload: unknown): RawApiFixture[] {
+  return Array.isArray((payload as { response?: unknown[] } | null | undefined)?.response)
+    ? ((payload as { response?: RawApiFixture[] }).response || [])
+    : [];
 }
 
 function isTestFixtureCandidate(item: RawApiFixture): boolean {
@@ -128,16 +144,32 @@ function isTestFixtureCandidate(item: RawApiFixture): boolean {
 }
 
 async function fetchApiJson(path: string, apiKey: string) {
-  const response = await fetch(`${API_BASE}${path}`, {
-    headers: { "x-apisports-key": apiKey },
-    cache: "no-store",
-  });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
 
-  if (!response.ok) {
-    throw new Error(`API request failed with ${response.status}`);
+  try {
+    const response = await fetch(`${API_BASE}${path}`, {
+      headers: {
+        "x-apisports-key": apiKey,
+        accept: "application/json",
+      },
+      cache: "no-store",
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      throw new Error(`API request failed with ${response.status}`);
+    }
+
+    return response.json();
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new Error("API request timeout");
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
   }
-
-  return response.json();
 }
 
 function mapWorldCupFixture(item: RawApiFixture): ApiFixtureItem {
@@ -170,14 +202,21 @@ function mapWorldCupFixture(item: RawApiFixture): ApiFixtureItem {
   };
 }
 
+function shouldHideTestFixture(fixture: ApiFixtureItem, now = Date.now()): boolean {
+  if (!fixture.supplemental || !isTerminalStatus(fixture.statusShort)) return false;
+
+  const kickoffAt = new Date(fixture.kickoff).getTime();
+  if (Number.isNaN(kickoffAt)) return false;
+
+  return now >= kickoffAt + TEST_HIDE_AFTER_MS;
+}
+
 function mapTestFixture(item: RawApiFixture): ApiFixtureItem | null {
   const fixture = item?.fixture;
   const teams = item?.teams;
   const goals = item?.goals;
   const status = fixture?.status;
 
-  const rawHome = (teams?.home?.name as string) || TEST_FIXTURE_LOOKUP.homeTeam;
-  const rawAway = (teams?.away?.name as string) || TEST_FIXTURE_LOOKUP.awayTeam;
   const rawCity = (fixture?.venue?.city as string | null) || null;
 
   const mapped: ApiFixtureItem = {
@@ -199,10 +238,6 @@ function mapTestFixture(item: RawApiFixture): ApiFixtureItem | null {
   };
 
   return shouldHideTestFixture(mapped) ? null : mapped;
-}
-
-function shouldHideTestFixture(fixture: ApiFixtureItem): boolean {
-  return Boolean(fixture.supplemental && isTerminalStatus(fixture.statusShort));
 }
 
 async function resolveTestFixtureId(apiKey: string): Promise<number | null> {
@@ -245,7 +280,7 @@ async function fetchTestFixture(apiKey: string): Promise<ApiFixtureItem | null> 
         selectedFixture = liveFixture;
       }
     } catch {
-      // Si el endpoint live no responde, usamos el snapshot base del fixture.
+      // Si live=all falla, conservamos el snapshot base del fixture.
     }
   }
 
@@ -270,10 +305,12 @@ function buildCalendarPayload(connection: "calendar" | "error", error?: string) 
 }
 
 export async function GET() {
-  const apiKey = process.env.API_SPORTS_KEY || FALLBACK_API_SPORTS_KEY;
+  const apiKey = getApiKey();
 
   if (!apiKey) {
-    return NextResponse.json(buildCalendarPayload("calendar"));
+    return NextResponse.json(buildCalendarPayload("calendar"), {
+      headers: { "Cache-Control": "no-store, max-age=0" },
+    });
   }
 
   const settled = await Promise.allSettled([
@@ -301,24 +338,32 @@ export async function GET() {
     ...(testFixture ? [testFixture] : []),
   ]);
 
-  const hasRealApiFixture = worldCupFixtures.length > 0 || Boolean(testFixture?.apiId);
+  const apiConnected = settled.some((result) => result.status === "fulfilled");
 
-  if (hasRealApiFixture) {
-    return NextResponse.json({
-      source: "api-football",
-      connection: "live",
-      updatedAt: new Date().toISOString(),
-      fixtures,
-      ...(errors.length ? { error: errors.join(" | ") } : {}),
-    });
+  if (apiConnected) {
+    return NextResponse.json(
+      {
+        source: "api-football",
+        connection: "live",
+        updatedAt: new Date().toISOString(),
+        fixtures,
+        ...(errors.length ? { error: errors.join(" | ") } : {}),
+      },
+      { headers: { "Cache-Control": "no-store, max-age=0" } }
+    );
   }
 
   if (errors.length > 0) {
     return NextResponse.json(
       buildCalendarPayload("error", errors.join(" | ")),
-      { status: 500 }
+      {
+        status: 500,
+        headers: { "Cache-Control": "no-store, max-age=0" },
+      }
     );
   }
 
-  return NextResponse.json(buildCalendarPayload("calendar"));
+  return NextResponse.json(buildCalendarPayload("calendar"), {
+    headers: { "Cache-Control": "no-store, max-age=0" },
+  });
 }

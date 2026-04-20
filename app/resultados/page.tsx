@@ -288,6 +288,9 @@ export default function ResultadosPage() {
   }, [data, mutate]);
 
   const connection = error ? "error" : data?.connection || "calendar";
+  const hasWorldCupApiRows = Boolean(data?.fixtures?.some((fixture) => !fixture.supplemental && fixture.apiId !== null));
+  const hasAnyTestFixture = Boolean(data?.fixtures?.some((fixture) => fixture.supplemental));
+  const hasTestApiRow = Boolean(data?.fixtures?.some((fixture) => fixture.supplemental && fixture.apiId !== null));
   const mergedMatches = useMemo(() => mergeScheduleWithApi(data?.fixtures || []), [data]);
 
   const filteredMatches = useMemo(() => {
@@ -478,11 +481,21 @@ export default function ResultadosPage() {
         </>
       )}
 
-      {connection !== "live" ? (
+      {connection === "error" ? (
         <p className="status-note mb-6 mt-4 text-text-muted">
-          {connection === "error"
-            ? "La API no responde ahora mismo. El Mundial mantiene el calendario base y el test de Premier League queda en modo placeholder hasta recuperar conexión."
-            : "Se muestra el calendario base del Mundial. Cuando la API esté disponible, el test de Premier League tomará marcador, estado y minuto reales."}
+          La API no responde ahora mismo. El Mundial mantiene el calendario base y el test de Premier League queda en modo placeholder hasta recuperar conexión.
+        </p>
+      ) : connection === "calendar" ? (
+        <p className="status-note mb-6 mt-4 text-text-muted">
+          Se muestra el calendario base del Mundial. Cuando la API esté disponible, el test de Premier League tomará marcador, estado y minuto reales.
+        </p>
+      ) : !hasWorldCupApiRows || (hasAnyTestFixture && !hasTestApiRow) ? (
+        <p className="status-note mb-6 mt-4 text-text-muted">
+          {!hasWorldCupApiRows && hasAnyTestFixture && !hasTestApiRow
+            ? "API conectada. El Mundial sigue en calendario base y el partido Test permanece en placeholder hasta que API-Football publique ambos datasets."
+            : !hasWorldCupApiRows
+              ? "API conectada. El Mundial sigue en calendario base hasta que API-Football publique sus fixtures oficiales."
+              : "API conectada. El partido Test permanece en placeholder hasta que el fixture de Premier League quede disponible en API-Football."}
         </p>
       ) : null}
     </div>
