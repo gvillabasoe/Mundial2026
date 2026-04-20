@@ -55,7 +55,7 @@ function LoginView({ onLogin }: { onLogin: (u: string, p: string) => boolean }) 
             <input className="input-field !pr-10" type={showPass ? "text" : "password"}
               placeholder="Contraseña" value={password}
               onChange={(e) => setPassword(e.target.value)} onKeyDown={(e) => e.key === "Enter" && handle()} />
-            <button onClick={() => setShowPass(!s => !s)}
+            <button onClick={() => setShowPass(prev => !prev)}
               className="absolute right-3 top-1/2 -translate-y-1/2 text-text-muted bg-transparent border-none cursor-pointer">
               {showPass ? <EyeOff size={15} /> : <Eye size={15} />}
             </button>
