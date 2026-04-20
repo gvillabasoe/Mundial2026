@@ -1,149 +1,206 @@
 "use client";
 
-import type { ReactNode } from "react";
 import Image from "next/image";
-import type { LucideIcon } from "lucide-react";
-import { useEffect, useState } from "react";
-import { getFlagEmoji, getFlagPath } from "@/lib/flags";
 import { GROUP_COLORS } from "@/lib/data";
+import { useEffect, useState } from "react";
+import type { LucideIcon } from "lucide-react";
 
-const FLAG_SIZES = { sm: 18, md: 22, lg: 30 } as const;
+// ─── Flag emoji map ──────────────────────────────────
+// All flags → emoji. Exception: Inglaterra → PNG image.
 
-export function Flag({ country, size = "md", className = "" }: { country: string; size?: "sm" | "md" | "lg"; className?: string }) {
-  const flagPath = getFlagPath(country);
-  const [imgError, setImgError] = useState(false);
-  const emoji = getFlagEmoji(country);
+const FLAG_EMOJI: Record<string, string> = {
+  "México": "🇲🇽", "Sudáfrica": "🇿🇦", "Corea del Sur": "🇰🇷", "Chequia": "🇨🇿",
+  "Canadá": "🇨🇦", "Bosnia y Herzegovina": "🇧🇦", "Catar": "🇶🇦", "Suiza": "🇨🇭",
+  "Brasil": "🇧🇷", "Marruecos": "🇲🇦", "Haití": "🇭🇹", "Escocia": "🏴󠁧󠁢󠁳󠁣󠁴󠁿",
+  "Estados Unidos": "🇺🇸", "Paraguay": "🇵🇾", "Australia": "🇦🇺", "Turquía": "🇹🇷",
+  "Alemania": "🇩🇪", "Curazao": "🇨🇼", "Costa de Marfil": "🇨🇮", "Ecuador": "🇪🇨",
+  "Países Bajos": "🇳🇱", "Japón": "🇯🇵", "Suecia": "🇸🇪", "Túnez": "🇹🇳",
+  "Bélgica": "🇧🇪", "Egipto": "🇪🇬", "Irán": "🇮🇷", "Nueva Zelanda": "🇳🇿",
+  "España": "🇪🇸", "Cabo Verde": "🇨🇻", "Arabia Saudí": "🇸🇦", "Uruguay": "🇺🇾",
+  "Francia": "🇫🇷", "Senegal": "🇸🇳", "Irak": "🇮🇶", "Noruega": "🇳🇴",
+  "Argentina": "🇦🇷", "Argelia": "🇩🇿", "Austria": "🇦🇹", "Jordania": "🇯🇴",
+  "Portugal": "🇵🇹", "RD Congo": "🇨🇩", "Uzbekistán": "🇺🇿", "Colombia": "🇨🇴",
+  "Inglaterra": "🏴󠁧󠁢󠁥󠁮󠁧󠁿", "Croacia": "🇭🇷", "Ghana": "🇬🇭", "Panamá": "🇵🇦",
+};
 
-  useEffect(() => {
-    setImgError(false);
-  }, [country, flagPath]);
-  const px = FLAG_SIZES[size];
+const EMOJI_SIZES: Record<string, string> = {
+  sm: "text-base leading-none",
+  md: "text-xl leading-none",
+  lg: "text-[28px] leading-none",
+};
 
-  if (flagPath && !imgError) {
+const IMG_SIZES = { sm: 20, md: 28, lg: 36 };
+
+export function Flag({
+  country,
+  size = "md",
+  className = "",
+}: {
+  country: string;
+  size?: "sm" | "md" | "lg";
+  className?: string;
+}) {
+  // Inglaterra → PNG (única excepción)
+  if (country === "Inglaterra") {
+    const px = IMG_SIZES[size];
     return (
       <Image
-        src={flagPath}
-        alt={country}
+        src="/flags/Inglaterra.png"
+        alt="Inglaterra"
         width={px}
         height={Math.round(px * 0.67)}
-        className={`rounded-[4px] border object-cover shadow-[0_4px_10px_rgba(var(--shadow-color),0.12)] ${className}`}
-        style={{ borderColor: "rgba(var(--divider),0.1)", background: "rgba(var(--surface-soft),0.05)" }}
-        onError={() => setImgError(true)}
+        className={`rounded-[3px] object-cover ${className}`}
       />
     );
   }
 
-  const fontSize = size === "sm" ? "text-sm" : size === "lg" ? "text-[20px]" : "text-base";
+  const emoji = FLAG_EMOJI[country];
+  if (emoji) {
+    return (
+      <span className={`${EMOJI_SIZES[size]} ${className}`} role="img" aria-label={country}>
+        {emoji}
+      </span>
+    );
+  }
+
+  const px = IMG_SIZES[size];
   return (
     <span
-      className={`inline-flex items-center justify-center rounded-[6px] border px-1.5 py-0.5 leading-none shadow-[0_4px_10px_rgba(var(--shadow-color),0.08)] ${fontSize} ${className}`}
-      style={{ borderColor: "rgba(var(--divider),0.1)", background: "rgba(var(--surface-soft),0.06)" }}
-      role="img"
-      aria-label={country}
+      className={`inline-flex items-center justify-center rounded bg-bg-5 text-[9px] text-text-muted ${className}`}
+      style={{ width: px, height: Math.round(px * 0.67) }}
     >
-      {emoji}
+      ?
     </span>
   );
 }
 
-export function CountryWithFlag({ country, size = "sm" }: { country: string; size?: "sm" | "md" }) {
+// ─── CountryWithFlag ─────────────────────────────────
+
+export function CountryWithFlag({
+  country,
+  size = "sm",
+  className = "",
+}: {
+  country: string;
+  size?: "sm" | "md";
+  className?: string;
+}) {
   if (!country) return null;
   return (
-    <span className="inline-flex items-center gap-1.5 align-middle">
+    <span className={`inline-flex items-center gap-1 ${className}`}>
       <Flag country={country} size={size} />
       <span>{country}</span>
     </span>
   );
 }
 
+// ─── Group Badge ─────────────────────────────────────
+
 export function GroupBadge({ group }: { group: string }) {
-  const color = GROUP_COLORS[group] || "#98A3B8";
+  const color = GROUP_COLORS[group] ?? "#7A8598";
   return (
     <span
-      className="inline-flex items-center rounded-full border px-2.5 py-0.5 text-[10px] font-bold tracking-wide shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]"
-      style={{ background: `${color}1F`, color, borderColor: `${color}38` }}
+      className="inline-flex items-center px-2 py-0.5 rounded-md text-[9px] font-bold tracking-widest uppercase"
+      style={{ background: `${color}1A`, color, border: `1px solid ${color}30` }}
     >
       Grupo {group}
     </span>
   );
 }
 
-export function SectionTitle({ children, accent, icon: Icon, right }: { children: ReactNode; accent?: string; icon?: LucideIcon; right?: ReactNode }) {
+// ─── Section Title ────────────────────────────────────
+
+export function SectionTitle({
+  children,
+  accent,
+  icon: Icon,
+  right,
+}: {
+  children: React.ReactNode;
+  accent?: string;
+  icon?: LucideIcon;
+  right?: React.ReactNode;
+}) {
   return (
-    <div className="mb-3 flex items-center justify-between gap-3">
-      <div className="flex min-w-0 items-center gap-2.5">
-        {Icon ? (
-          <span className="inline-flex h-9 w-9 items-center justify-center rounded-2xl border border-[rgb(var(--divider)/0.08)] bg-[rgb(var(--bg-3)/0.7)] shadow-[0_8px_18px_rgba(var(--shadow-color),0.08)]">
-            <Icon size={17} style={{ color: accent || "#D4AF37" }} />
-          </span>
-        ) : null}
-        <div>
-          <h2 className="font-display text-lg font-bold text-text-warm">{children}</h2>
-          <div className="mt-1 h-[2px] w-12 rounded-full" style={{ background: `linear-gradient(90deg, ${accent || "#D4AF37"}, transparent)` }} />
-        </div>
+    <div className="flex items-center justify-between mb-3">
+      <div className="flex items-center gap-2">
+        {Icon && <Icon size={16} style={{ color: accent ?? "#D4AF37" }} />}
+        <h2 className="font-display text-base font-bold tracking-tight" style={{ color: "#E8EAF0" }}>
+          {children}
+        </h2>
       </div>
       {right}
     </div>
   );
 }
 
-export function EmptyState({ text, title = "Nada que mostrar", icon: Icon, action }: { text: string; title?: string; icon?: LucideIcon; action?: ReactNode }) {
+// ─── Empty State ──────────────────────────────────────
+
+export function EmptyState({ text, icon: Icon }: { text: string; icon?: LucideIcon }) {
   return (
-    <div className="empty-state">
-      {Icon ? (
-        <span className="mb-2 inline-flex h-12 w-12 items-center justify-center rounded-[16px] border border-[rgb(var(--divider)/0.08)] bg-[rgb(var(--bg-3)/0.72)] text-text-muted shadow-[0_12px_24px_rgba(var(--shadow-color),0.12)]">
-          <Icon size={22} className="opacity-70" />
-        </span>
-      ) : null}
-      <p className="empty-state__kicker">Estado</p>
-      <h3 className="empty-state__title">{title}</h3>
-      <p className="empty-state__text">{text}</p>
-      {action ? <div className="mt-3">{action}</div> : null}
+    <div className="card text-center py-10 text-text-muted">
+      {Icon && <Icon size={28} className="mx-auto mb-2.5 opacity-30" />}
+      <p className="text-sm">{text}</p>
     </div>
   );
 }
+
+// ─── DemoBadge ────────────────────────────────────────
+
+export function DemoBadge() {
+  return (
+    <span className="badge badge-muted text-[9px]">Demo</span>
+  );
+}
+
+// ─── Countdown ────────────────────────────────────────
 
 export function Countdown({ target }: { target: string }) {
   const [diff, setDiff] = useState({ d: 0, h: 0, m: 0, s: 0 });
 
   useEffect(() => {
-    const targetTime = new Date(target).getTime();
+    const t = new Date(target).getTime();
     const tick = () => {
-      const remaining = Math.max(0, targetTime - Date.now());
+      const rem = Math.max(0, t - Date.now());
       setDiff({
-        d: Math.floor(remaining / 86400000),
-        h: Math.floor((remaining % 86400000) / 3600000),
-        m: Math.floor((remaining % 3600000) / 60000),
-        s: Math.floor((remaining % 60000) / 1000),
+        d: Math.floor(rem / 86400000),
+        h: Math.floor((rem % 86400000) / 3600000),
+        m: Math.floor((rem % 3600000) / 60000),
+        s: Math.floor((rem % 60000) / 1000),
       });
     };
-
     tick();
-    const interval = window.setInterval(tick, 1000);
-    return () => window.clearInterval(interval);
+    const iv = setInterval(tick, 1000);
+    return () => clearInterval(iv);
   }, [target]);
 
-  const items = [
-    { label: "días", value: diff.d },
-    { label: "horas", value: diff.h },
-    { label: "min", value: diff.m },
-    { label: "seg", value: diff.s },
+  const units = [
+    { val: diff.d, label: "días" },
+    { val: diff.h, label: "h" },
+    { val: diff.m, label: "min" },
+    { val: diff.s, label: "seg" },
   ];
 
   return (
-    <div className="flex justify-center gap-2.5">
-      {items.map((item, index) => (
-        <div key={item.label} className="text-center">
-          <div className={`countdown-chip ${index === 3 ? "animate-count-pulse" : ""}`}>
-            {String(item.value).padStart(2, "0")}
+    <div className="flex gap-2 justify-center">
+      {units.map((u, i) => (
+        <div key={i} className="text-center">
+          <div
+            className={`font-display text-[26px] font-black text-gold-light rounded-xl px-3 py-2 min-w-[54px] ${
+              i === 3 ? "animate-count-pulse" : ""
+            }`}
+            style={{
+              background: "rgba(212,175,55,0.06)",
+              border: "1px solid rgba(212,175,55,0.12)",
+            }}
+          >
+            {String(u.val).padStart(2, "0")}
           </div>
-          <span className="mt-1 block text-[10px] text-text-muted">{item.label}</span>
+          <span className="text-[9px] text-text-muted mt-1 block uppercase tracking-widest">
+            {u.label}
+          </span>
         </div>
       ))}
     </div>
   );
-}
-
-export function DemoBadge() {
-  return <span className="demo-badge">Datos demo</span>;
 }
