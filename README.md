@@ -6,7 +6,7 @@ Versión Vercel-ready de la porra del Mundial 2026, ya fusionada con la app prem
 
 - Inicio con logo, cuenta atrás, accesos rápidos, top 3, radar premium, actividad y sistema de puntuación completo.
 - Clasificación con búsqueda, filtros, favoritos persistentes y ficha detallada de cada equipo.
-- Resultados unificados con los 104 partidos, filtros por fase, región y ciudad, hora siempre en Europe/Madrid y un fixture de prueba Crystal Palace vs West Ham United con polling real y auto-hide condicionado por estado final + 2 horas desde el kickoff.
+- Resultados unificados con los 104 partidos, filtros por fase, región y ciudad, hora siempre en Europe/Madrid y un fixture de prueba Crystal Palace vs West Ham con resolución dinámica de fixture_id, polling real mientras está en vivo, marcador con fallback 0-0 y auto-hide solo tras 2 horas + FT/AET/PEN.
 - Mi Club con login demo, selector de equipo y tabs de resumen, partidos, grupos, eliminatorias, especiales y favoritos.
 - Versus privado contra consenso o rival concreto.
 - Probabilidades de ganador vía Polymarket, con API interna en `/api/probabilities`, refresco periódico, hero premium, histórico y shortlist filtrada.
@@ -28,7 +28,7 @@ POLYMARKET_GAMMA_BASE=https://gamma-api.polymarket.com
 
 Notas:
 
-- `API_SPORTS_KEY` es opcional. Sin esa clave, la app funciona completa en modo demo con calendario estático y picks deterministas.
+- `API_SPORTS_KEY` permite sobrescribir la clave server-side usada para el test fixture en vivo. Si la API no responde, la app mantiene el calendario base del Mundial y oculta el test fixture para no simular datos.
 - `POLYMARKET_GAMMA_BASE` es opcional. La lectura de mercados se hace contra la Gamma API pública de Polymarket; solo se deja como override por si quieres apuntar a otro host compatible.
 
 ## Desarrollo local
