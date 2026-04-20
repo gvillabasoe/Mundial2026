@@ -265,7 +265,7 @@ function TabEliminatorias({
 
   const toggleTeam = (roundKey: string, team: string, max: number) => {
     setResults((prev) => {
-      const current: string[] = (prev.knockout as Record<string, string[]>)[roundKey] ?? [];
+      const current: string[] = (prev.knockout as unknown as Record<string, string[]>)[roundKey] ?? [];
       const next = current.includes(team)
         ? current.filter((t) => t !== team)
         : current.length < max
@@ -288,7 +288,7 @@ function TabEliminatorias({
       </p>
 
       {KO_ROUNDS.map(({ key, label, max }) => {
-        const selected: string[] = (results.knockout as Record<string, string[]>)[key] ?? [];
+        const selected: string[] = (results.knockout as unknown as Record<string, string[]>)[key] ?? [];
         const isOpen = expanded === key;
         return (
           <div key={key} className="card !p-0 overflow-hidden">
